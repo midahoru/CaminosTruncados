@@ -1,0 +1,17 @@
+# Python cache directories
+__pycache__/
+# Python cache files
+*.pyc
+# Python optimized files
+*.pyo
+# Python dynamic libraries
+*.pyd
+
+# Jupyter notebooks
+*.ipynb
+
+# Virtual environment directories
+venv/
+
+# Results and output directories
+caminos/
