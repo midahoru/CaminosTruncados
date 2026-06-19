@@ -7,7 +7,7 @@ import sys
 import time
 
 import requests
-from shapely.geometry import LineString, Point, MultiPoint
+from shapely.geometry import LineString, Point, MultiPoint, mapping
 from shapely.strtree import STRtree
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -24,7 +24,7 @@ PEATONAL = {
     # Special roads
     "pedestrian",
     # Paths
-    "footway", "steps", "corridor", "path",
+    "footway", "steps",  "path", #"corridor",
     # Mainly for horses but pedestrians might be allowed (by definition)
     "bridleway"}
 
@@ -117,6 +117,16 @@ def a_geojson(cruces, buffer_m):
     } for c in cruces]
     return {"type": "FeatureCollection", "features": features}
 
+def senderos_a_geojson(senderos, lon0, lat0):
+    features = [{
+        "type": "Feature",
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [list(desproyectar(x, y, lon0, lat0)) for x, y in s["geom"].coords],
+        },
+        "properties": {"id": s["id"]},
+    } for s in senderos]
+    return {"type": "FeatureCollection", "features": features}
 
 # --------------------------- Senderos y vías ---------------------------
 
@@ -144,10 +154,16 @@ def construir_geometrias(osm_ways, lon0, lat0):
             "geom": LineString(coords), "nodos": set(el["nodes"]),
         }
         if hw in PEATONAL:
-            # Excluir andenes, puentes y cruces peatonales
-            # if tags.get("footway") == "sidewalk":
-            # 
-            if (tags.get("footway") and tags.get("footway") in ["sidewalk", "traffic_island", "crossing", "links"]) or (tags.get("sidewalk"))  or (tags.get("bridge")):
+            # Exluir andenes
+            ignore_footway_type = tags.get("footway") in {"sidewalk", "traffic_island", "crossing", "links"}
+            # y puentes            
+            is_bridge = tags.get("bridge") == "yes"
+            # y túneles
+            is_tunnel = tags.get("tunnel") == "yes"
+            # y áreas peatonales
+            is_pedestrian_area = hw == "pedestrian" and tags.get("area") == "yes"
+            
+            if ignore_footway_type or is_bridge or is_tunnel or is_pedestrian_area:
                 continue
             peatonales.append(registro)
         elif hw in MOTORIZADA:
@@ -292,11 +308,15 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
     mtree = STRtree([m["geom"] for m in motorizadas])
 
     agregados = {}
+    ids_senderos = set()
+
     for ped in peatonales:
         # Itera sobre las vias motorizadas que intersectan el sendero peatonal (+ buffer)
         for j in mtree.query(ped["geom"]):
             mot = motorizadas[int(j)]
-            if not ped["geom"].intersects(mot["geom"]):
+            # Double check de la intersección
+            hay_interseccion = ped["geom"].intersects(mot["geom"])
+            if not hay_interseccion:
                 continue
             # Intersección entre el sendero peatonal y la via motorizada
             inter = ped["geom"].intersection(mot["geom"])
@@ -317,12 +337,15 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
                 solo_izq = izq - der
                 solo_der = der - izq
                 # Si no hay almenos un sendero caminable a cada lado o 
-                # el sendero inicial (ped) está en ambos lados, se ignora el cruce
+                # el sendero inicial (ped) está en al menos un lado se ignora el cruce
                 # Si hay un mismo sendero diferente a ped en ambos lados, se asume que la intersección
                 # se encontrará en su iteración. Esto para dejar por fuera senderos muy cercanos a la intersección,
                 # pero que en realidad no sean interrumpidos por la vía (ver parque el Virrey, Cll. 88 - Cra. 16, Bogotá, Colombia)
-                # if not (izq and der):
-                if not (solo_izq and solo_der) and not (ped["id"] in izq and ped["id"] in der):
+                senderos_ambos_lados = solo_izq and solo_der
+                sendero_ori_al_menos_un_lado = ped["id"] in izq or ped["id"] in der
+                sendero_ori_ambos_lados = ped["id"] in izq and ped["id"] in der
+                
+                if (not senderos_ambos_lados and not sendero_ori_ambos_lados) or not sendero_ori_al_menos_un_lado:
                     continue
                 lon, lat = desproyectar(c[0], c[1], lon0, lat0)
                 clave = (round(lon, 7), round(lat, 7))
@@ -335,7 +358,11 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
                 agg["ways"] |= (izq | der)
                 if ped["nodos"] & mot["nodos"]:
                     agg["shared"] = True
-    return list(agregados.values())
+                # Senderos considerados
+                ids_senderos.update(izq)
+                ids_senderos.update(der)
+                    
+    return list(agregados.values()), ids_senderos
 
 
 # --------------------------- CLI ---------------------------
@@ -380,7 +407,8 @@ def main():
 
     # Detecta los cruces peatonales discontinuos
     print(f"Detectando cruces (buffer {args.buffer} m)...")
-    cruces = detectar_cruces(peatonales, motorizadas, lon0, lat0, buffer_m=args.buffer)
+    cruces, ids_senderos_cruces = detectar_cruces(peatonales, motorizadas, lon0, lat0, buffer_m=args.buffer)
+    senderos_cruces = [p for p in peatonales if p["id"] in ids_senderos_cruces]
     print(f"  cruces seleccionados: {len(cruces)}")
 
     
@@ -391,8 +419,11 @@ def main():
 
     # Exporta el resultado a GeoJSON
     geojson = a_geojson(cruces, args.buffer)
+    senderos_geojson = senderos_a_geojson(senderos_cruces, lon0, lat0)
     with open(ruta, "w", encoding="utf-8") as f:
         json.dump(geojson, f, ensure_ascii=False, indent=2)
+    with open(ruta.with_stem(ruta.stem + "_senderos"), "w", encoding="utf-8") as f:
+        json.dump(senderos_geojson, f, ensure_ascii=False, indent=2)
     print(f"Guardado: {ruta}")    
 
 
