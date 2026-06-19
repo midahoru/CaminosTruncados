@@ -11,7 +11,7 @@ __pycache__/
 *.ipynb
 
 # Virtual environment directories
-venv/
+.venv/
 
 # Results and output directories
 caminos/

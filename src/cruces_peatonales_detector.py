@@ -2,6 +2,7 @@
 import argparse
 import json
 import math
+from pathlib import Path
 import sys
 import time
 
@@ -382,11 +383,17 @@ def main():
     cruces = detectar_cruces(peatonales, motorizadas, lon0, lat0, buffer_m=args.buffer)
     print(f"  cruces seleccionados: {len(cruces)}")
 
+    
+    # Crea la carpeta de salida si no existe
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    data_dir.mkdir(exist_ok=True)
+    ruta = data_dir / args.output
+
     # Exporta el resultado a GeoJSON
     geojson = a_geojson(cruces, args.buffer)
-    with open(f"./data/{args.output}", "w", encoding="utf-8") as f:
+    with open(ruta, "w", encoding="utf-8") as f:
         json.dump(geojson, f, ensure_ascii=False, indent=2)
-    print(f"Guardado: {args.output}")
+    print(f"Guardado: {ruta}")    
 
 
 if __name__ == "__main__":
