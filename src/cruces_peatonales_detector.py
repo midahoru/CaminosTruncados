@@ -208,7 +208,7 @@ def direccion_segmento(coords, c):
     return (1.0, 0.0) if norma == 0 else (dx / norma, dy / norma)
 
 
-def coords_densas(geom, paso):
+def coords_densas(geom, paso, c):
     """Muestrea puntos a lo largo de una geometria de lineas cada 'paso' metros."""
     # Extrae todas las líneas que puedan surgir
     lineas = []
@@ -237,6 +237,9 @@ def coords_densas(geom, paso):
             p = ln.interpolate(k * paso)
             pts.append((p.x, p.y))
         pts.append(ln.coords[-1])
+
+    # Ordena los puntos por distancia al cruce c
+    pts.sort(key=lambda p: math.hypot(p[0] - c[0], p[1] - c[1]))
     return pts
 
 
@@ -261,15 +264,13 @@ def caminables_por_lado(c, vec_dir_m, peatonales, ptree, buffer_m, paso, tol, ne
         # Banderas
         en_izquierda, en_derecha = False, False
         
-        for px, py in coords_densas(recorte, paso):
+        for px, py in coords_densas(recorte, paso, c):
             # Vector normalizado del cruce al punto muestreado
             dxr, dyr = (px - cx, py - cy)
             normar = math.hypot(dxr, dyr)
             rx, ry = (1.0, 0.0) if normar == 0 else (dxr / normar, dyr / normar) 
-            # TODO revusar
             # Si el punto muestreado está muy cerca del cruce, 
             # se asume que es el mismo cruce y se ignora
-            # if math.hypot(rx, ry) < near:
             if normar < near:
                 continue
             # Producto cruz entre vec_dir_m y el vector del cruce al punto muestreado
@@ -311,10 +312,10 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
     ids_senderos = set()
 
     for ped in peatonales:
-        # Itera sobre las vias motorizadas que intersectan el sendero peatonal (+ buffer)
+        # Itera sobre las vias motorizadas cuyo boundingbox intersecta el sendero peatonal
         for j in mtree.query(ped["geom"]):
             mot = motorizadas[int(j)]
-            # Double check de la intersección
+            # Valida que la intersección sea real
             hay_interseccion = ped["geom"].intersects(mot["geom"])
             if not hay_interseccion:
                 continue
