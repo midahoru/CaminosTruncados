@@ -243,7 +243,7 @@ def coords_densas(geom, paso, c):
     return pts
 
 
-def caminables_por_lado(c, vec_dir_m, peatonales, ptree, buffer_m, paso, tol, near):
+def caminables_por_lado(p, m, comparados, c, vec_dir_m, peatonales, ptree, buffer_m, paso, tol, near):
     """Conjuntos de ids de senderos caminables a cada lado de la via, dentro del buffer.
 
     El lado se define por la distancia perpendicular con signo a la tangente de la
@@ -253,12 +253,18 @@ def caminables_por_lado(c, vec_dir_m, peatonales, ptree, buffer_m, paso, tol, ne
     izquierda, derecha = set(), set()
     cx, cy = c
     dx, dy = vec_dir_m
-    # Consulta los senderos peatonales que intersectan el buffer de la intersección
+    # Consulta los senderos peatonales que intersectan el boundingbox del buffer de la intersección
     for idx in ptree.query(disco):
         w = peatonales[int(idx)]
+        # Valida que el sendero peatonal intersecte el buffer de la intersección
         recorte = w["geom"].intersection(disco)
-        if recorte.is_empty:
+        # Verifica que no se haya evaluado este par de senderos con la vía motorizada de la iteración
+        tupla_agregar = tuple((p["id"], w["id"], m["id"]))
+        tupla = tuple((w["id"], p["id"], m["id"]))
+        antes_evaluado = tupla in comparados
+        if recorte.is_empty or antes_evaluado:
             continue
+        comparados.add(tupla_agregar)
         # Toma la intersección (recorte) y la muestrea cada 'paso' metros para evaluar 
         # su posición relativa a la vía motorizada
         # Banderas
@@ -308,8 +314,12 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
     ptree = STRtree([p["geom"] for p in peatonales])
     mtree = STRtree([m["geom"] for m in motorizadas])
 
+    # Intersecciones
     agregados = {}
+    # Senderos asociados a intersecciones
     ids_senderos = set()
+    # Tuplas (sendero peatonal 1, sendero peatonal 2, vía motorizada) que ya fueron comparadas
+    comparados = set()
 
     for ped in peatonales:
         # Itera sobre las vias motorizadas cuyo boundingbox intersecta el sendero peatonal
@@ -331,7 +341,7 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
                 # y eso afecta la determinación de los lados izquierdo y derecho de la vía, pero es irrelevante
                 vec_dir = direccion_segmento(coords_via, c)
                 # Busca los senderos caminables a cada lado de la vía dentro del buffer
-                izq, der = caminables_por_lado(
+                izq, der = caminables_por_lado(ped, mot, comparados,
                     c, vec_dir, peatonales, ptree, buffer_m, paso, tol, near)
                 # Senderos presentes solo a un lado de la vía
                 # son aquellos que con mayor probabilidad pueden estar interrumpidos
@@ -369,6 +379,7 @@ def detectar_cruces(peatonales, motorizadas, lon0, lat0,
 # --------------------------- CLI ---------------------------
 
 def main():
+    ti = time.perf_counter()
     # Argumentos
     p = argparse.ArgumentParser(
         description="Detecta posibles cruces peatonales discontinuos (OSM)."
@@ -425,7 +436,10 @@ def main():
         json.dump(geojson, f, ensure_ascii=False, indent=2)
     with open(ruta.with_stem(ruta.stem + "_senderos"), "w", encoding="utf-8") as f:
         json.dump(senderos_geojson, f, ensure_ascii=False, indent=2)
-    print(f"Guardado: {ruta}")    
+    print(f"Guardado: {ruta}") 
+    
+    tf = time.perf_counter()   
+    print(f"Tiempo transcurrido: {tf - ti:.4f} segundos")
 
 
 if __name__ == "__main__":
